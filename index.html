@@ -4,6 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#3e2420">
+    <script>
+      try {
+        if (sessionStorage.getItem("perfect-mens-wear-intro-v1") === "shown" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          document.documentElement.classList.add("intro-suppressed");
+        }
+      } catch (_error) {}
+    </script>
+    <noscript><style>.intro-splash-overlay { display: none !important; }</style></noscript>
     <meta name="description" content="Discover timeless menswear and fabrics at Perfect Mens Wear, serving Purandar since 1998.">
     <meta property="og:title" content="Perfect Mens Wear | Purandar">
     <meta property="og:description" content="A considered collection of menswear and fabrics. Visit us in Purandar or enquire on WhatsApp.">
@@ -27,27 +35,29 @@
     <title>Perfect Mens Wear | Menswear &amp; Fabrics in Purandar</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Noto+Serif+Devanagari:wght@500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=17">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=22">
+    <script src="cinematic-intro.js?v=16" defer></script>
     <script src="site-config.js?v=14" defer></script>
     <script src="products.js?v=14" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js" defer></script>
-    <script src="app.js?v=15" defer></script>
-    <script src="cinematic-intro.js?v=15" defer></script>
+    <script src="app.js?v=17" defer></script>
+    <script src="motion.js?v=1" defer></script>
   </head>
   <body data-page="home">
-    <div class="intro-splash-overlay" data-intro-overlay aria-label="Perfect Mens Wear storefront entrance">
-      <video class="intro-splash-video" data-intro-video poster="assets/storefront-entrance-poster.webp?v=15" muted playsinline preload="auto" disablepictureinpicture tabindex="-1" aria-label="Cinematic view of the Perfect Mens Wear storefront"></video>
-      <div class="intro-splash-grade"></div>
-      <div class="intro-splash-top">
-        <p class="intro-identifier">PERFECT MENS WEAR</p>
-        <p class="intro-location" lang="mr">पुरंदर, पुणे</p>
+    <div class="intro-splash-overlay" data-intro-overlay role="dialog" aria-modal="true" aria-label="Perfect Mens Wear storefront entrance">
+      <div class="intro-curtain intro-curtain-left" aria-hidden="true"></div>
+      <div class="intro-curtain intro-curtain-right" aria-hidden="true"></div>
+      <div class="intro-splash-content" data-intro-content>
+        <svg class="intro-stitch-mark" viewBox="0 0 340 100" aria-hidden="true" focusable="false">
+          <path class="intro-thread intro-thread-p" pathLength="1" d="M50 80V20H82C108 20 108 50 82 50H50" />
+          <path class="intro-thread intro-thread-m" pathLength="1" d="M126 80V20L156 52L186 20V80" />
+          <path class="intro-thread intro-thread-w" pathLength="1" d="M215 20L229 80L252 42L275 80L289 20" />
+        </svg>
+        <p class="intro-store-name">PERFECT MENS WEAR</p>
+        <p class="intro-since">Since 1998</p>
+        <div class="intro-progress" aria-hidden="true"><span></span></div>
       </div>
-      <button class="intro-splash-skip" data-intro-skip type="button" aria-label="Skip intro and view store">Skip intro ✕</button>
-      <div class="intro-splash-progress-track" aria-hidden="true">
-        <div class="intro-splash-progress-bar" data-intro-progress></div>
-      </div>
+      <button class="intro-skip" data-intro-skip type="button" aria-label="Skip intro">Skip intro</button>
     </div>
     <div class="storefront-home-content">
       <div id="site-header"></div>
@@ -57,7 +67,7 @@
         <div class="hero-shade"></div>
         <div class="hero-content page-width">
           <p class="eyebrow eyebrow-light">PERFECT MENS WEAR <span>·</span> PURANDAR</p>
-          <h1>Dress the gentleman<br>in you.</h1>
+          <h1 class="hero-title" tabindex="-1"><span class="hero-title-line"><span>Dress the gentleman</span></span><span class="hero-title-line"><span>in you.</span></span></h1>
           <p class="hero-marathi" lang="mr">तुमच्या व्यक्तिमत्त्वाला साजेसा पोशाख</p>
           <p class="hero-copy">Thoughtful menswear, trusted names, and a little help finding just the right fit.</p>
           <div class="hero-actions">
@@ -75,8 +85,12 @@
             <p class="eyebrow">GOOD COMPANY</p>
             <h2>Names you know.<br class="mobile-only"> Quality you can feel.</h2>
           </div>
-          <div class="brand-list" aria-label="Selected brands">
-            <span>Solino</span><span>RAYMOND</span><span>Siyaram's</span><span>Linen Club</span><span>The Ruby Mills</span>
+          <div class="brand-marquee" data-brand-marquee>
+            <div class="brand-marquee-track">
+              <div class="brand-list" aria-label="Selected brands">
+                <span>Solino</span><span>RAYMOND</span><span>Siyaram's</span><span>Linen Club</span><span>The Ruby Mills</span>
+              </div>
+            </div>
           </div>
           <p class="small-note centered">A selection of the brands featured at our store. Availability may vary.</p>
         </div>

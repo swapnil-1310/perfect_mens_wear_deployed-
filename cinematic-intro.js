@@ -2,120 +2,151 @@
   "use strict";
 
   const overlay = document.querySelector("[data-intro-overlay]");
-  const video = document.querySelector("[data-intro-video]");
   const skipButton = document.querySelector("[data-intro-skip]");
-  const progressBar = document.querySelector("[data-intro-progress]");
+  const heroTitle = document.querySelector(".hero-title");
+  const introStorageKey = "perfect-mens-wear-intro-v1";
 
-  if (!overlay || !video) return;
+  if (!overlay) return;
 
-  const MAX_DURATION = 6.30;
-  let dismissed = false;
+  const timers = new Set();
+  let isFinished = false;
+  let keyboardHandler;
 
-  function dismissIntro() {
-    if (dismissed) return;
-    dismissed = true;
+  function schedule(callback, delay) {
+    const timer = window.setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+    return timer;
+  }
 
-    try {
-      video.pause();
-    } catch (e) {}
+  function removeOverlay() {
+    overlay.remove();
+  }
 
-    document.body.classList.remove("intro-is-playing");
-    overlay.classList.add("is-dismissed");
+  function revealHero() {
+    if (!heroTitle) return;
+    heroTitle.classList.remove("is-intro-pending");
+    heroTitle.classList.add("is-revealed");
+  }
 
-    setTimeout(() => {
-      overlay.style.display = "none";
-      overlay.remove();
-    }, 800);
+  function ensureHeroLineMasks() {
+    if (!heroTitle || heroTitle.querySelector(".hero-title-line")) return;
+
+    const text = heroTitle.textContent.trim().replace(/\s+/g, " ");
+    if (!text) return;
+
+    const words = text.split(" ");
+    let splitAt = words.length;
+    if (words.length > 3) {
+      const totalLength = words.join(" ").length;
+      let bestDistance = totalLength;
+      let currentLength = 0;
+      for (let index = 1; index < words.length; index += 1) {
+        currentLength += words[index - 1].length + (index > 1 ? 1 : 0);
+        const distance = Math.abs(totalLength / 2 - currentLength);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          splitAt = index;
+        }
+      }
+    }
+
+    const lines = [words.slice(0, splitAt).join(" "), words.slice(splitAt).join(" ")].filter(Boolean);
+    heroTitle.replaceChildren(...lines.map((line) => {
+      const mask = document.createElement("span");
+      const textLine = document.createElement("span");
+      mask.className = "hero-title-line";
+      textLine.textContent = line;
+      mask.append(textLine);
+      return mask;
+    }));
+  }
+
+  function removeKeyboardHandler() {
+    if (!keyboardHandler) return;
+    document.removeEventListener("keydown", keyboardHandler);
+    keyboardHandler = undefined;
+  }
+
+  function finishIntro(skipped = false) {
+    if (isFinished) return;
+    isFinished = true;
+    timers.forEach((timer) => window.clearTimeout(timer));
+    timers.clear();
+    removeKeyboardHandler();
+
+    overlay.classList.add("is-opening");
+    if (skipped) overlay.classList.add("is-skipped");
+    revealHero();
+
+    if (skipped) {
+      schedule(removeOverlay, 240);
+      return;
+    }
+
+    removeOverlay();
+  }
+
+  function handleIntroKeydown(event) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+    if (event.key === "Tab") {
+      finishIntro(true);
+      return;
+    }
+
+    if (event.key === "Escape" || event.key === "Enter" || event.key === " " || event.key.length === 1) {
+      if (event.key === "Escape" || event.key === "Enter" || event.key === " ") event.preventDefault();
+      finishIntro(true);
+    }
   }
 
   function initialize() {
-    document.body.classList.add("intro-is-playing");
-
-    const config = window.PERFECT_MENS_CONFIG || {};
-    const isMobile = window.matchMedia(
-      "(max-width: 600px), (max-height: 500px) and (pointer: coarse)"
-    ).matches;
-
-    let videoPath = "";
-    if (
-      isMobile &&
-      typeof config.storefrontVideoMobileUrl === "string" &&
-      config.storefrontVideoMobileUrl.trim()
-    ) {
-      videoPath = config.storefrontVideoMobileUrl.trim();
-    } else if (
-      typeof config.storefrontVideoUrl === "string" &&
-      config.storefrontVideoUrl.trim()
-    ) {
-      videoPath = config.storefrontVideoUrl.trim();
+    if (heroTitle) {
+      new MutationObserver(ensureHeroLineMasks).observe(heroTitle, { childList: true });
     }
 
-    if (!videoPath) {
-      videoPath = isMobile
-        ? "assets/storefront-mobile-v2.mp4"
-        : "assets/storefront-entrance-v2.mp4";
+    let wasShown = false;
+    try {
+      wasShown = window.sessionStorage.getItem(introStorageKey) === "shown";
+    } catch (_error) {
+      // Storage may be unavailable in private browsing; the intro still works for this page view.
     }
 
-    const posterPath = isMobile
-      ? "assets/storefront-mobile-poster.webp"
-      : "assets/storefront-entrance-poster.webp";
-
-    video.muted = true;
-    video.defaultMuted = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    video.autoplay = true;
-
-    video.src = videoPath + "?v=15";
-    video.poster = posterPath + "?v=15";
-
-    // Attempt autoplay
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        // If autoplay blocked by battery saver, clicking anywhere starts it
-        const startOnTap = () => {
-          video.play();
-          window.removeEventListener("click", startOnTap);
-          window.removeEventListener("touchstart", startOnTap);
-        };
-        window.addEventListener("click", startOnTap, { once: true });
-        window.addEventListener("touchstart", startOnTap, { once: true });
-      });
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (wasShown || prefersReducedMotion) {
+      removeOverlay();
+      return;
     }
 
-    // Monitor video playback timeline
-    video.addEventListener("timeupdate", () => {
-      if (progressBar && video.duration) {
-        const effectiveDuration = Math.min(MAX_DURATION, video.duration);
-        const percent = Math.min(100, (video.currentTime / effectiveDuration) * 100);
-        progressBar.style.width = percent + "%";
-      }
-
-      // Hard stop and fade out as soon as the camera enters the shop (6.3s)
-      if (video.currentTime >= MAX_DURATION) {
-        dismissIntro();
-      }
-    });
-
-    video.addEventListener("ended", dismissIntro);
-
-    video.addEventListener("error", () => {
-      console.warn("Intro video could not load, bypassing intro.");
-      dismissIntro();
-    });
-
-    if (skipButton) {
-      skipButton.addEventListener("click", (e) => {
-        e.stopPropagation();
-        dismissIntro();
-      });
+    try {
+      window.sessionStorage.setItem(introStorageKey, "shown");
+    } catch (_error) {
+      // Continue with the reveal if session storage is unavailable.
     }
 
-    // Safety timeout: If video takes longer than 8 seconds, reveal store
-    setTimeout(() => {
-      if (!dismissed) dismissIntro();
-    }, 8500);
+    overlay.hidden = false;
+    overlay.classList.add("is-playing");
+    heroTitle?.classList.add("is-intro-pending");
+    skipButton?.focus({ preventScroll: true });
+
+    keyboardHandler = handleIntroKeydown;
+    document.addEventListener("keydown", keyboardHandler);
+    overlay.addEventListener("click", () => finishIntro(true), { once: true });
+
+    schedule(() => {
+      overlay.classList.add("is-opening");
+      removeKeyboardHandler();
+    }, 1400);
+
+    schedule(revealHero, 2200);
+    schedule(() => {
+      isFinished = true;
+      removeKeyboardHandler();
+      removeOverlay();
+    }, 2880);
   }
 
   if (document.readyState === "loading") {

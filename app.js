@@ -89,7 +89,7 @@
     "Sort products": "उत्पादने क्रमाने लावा", "Price: low to high": "किंमत: कमी ते जास्त",
     "Price: high to low": "किंमत: जास्त ते कमी", "Name: A to Z": "नाव: अ ते ज्ञ",
     "No products match your filters.": "तुमच्या फिल्टरशी जुळणारी उत्पादने नाहीत.",
-    "View details": "तपशील पाहा", "Enquire on WhatsApp": "WhatsApp वर चौकशी करा",
+    "View details": "तपशील पाहा", "Quick view": "झटपट पाहा", "Enquire on WhatsApp": "WhatsApp वर चौकशी करा",
     "Colour": "रंग", "Festival edit": "सणासुदीचे कलेक्शन", "New arrivals": "नवीन आगमन",
     "Bestsellers": "लोकप्रिय निवड", "Wishlist": "आवडते", "Instagram": "Instagram",
     "Contact us": "आमच्याशी संपर्क साधा", "Send enquiry": "चौकशी पाठवा",
@@ -188,8 +188,11 @@
   let cart = readCart();
   let activeCategory = "All";
   let drawerTrigger = null;
+  let drawerCloseTimer = 0;
   let productTrigger = null;
+  let productModalCloseTimer = 0;
   let activeBannerData = null;
+  let lastCartCount = null;
 
   const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;",
@@ -453,6 +456,7 @@
       updateCart();
       return;
     }
+    renderProductSkeletons();
     const headers = { apikey: config.supabaseAnonKey, Authorization: `Bearer ${config.supabaseAnonKey}` };
     try {
       const [productResponse, settingsResponse, bannerResponse] = await Promise.all([
@@ -489,6 +493,7 @@
     } catch (error) {
       console.error("Could not load the live catalogue or store settings.", error);
       sanitizeCart();
+      renderProducts();
       updateCart();
       showToast(t("Could not load the live catalogue. Please try again later."));
     }
@@ -529,38 +534,100 @@
     if (consent && hasSupabaseConfig()) consent.hidden = false;
   }
 
+  function safeProductImage(source) {
+    return typeof source === "string" && /^(https:\/\/|\/(?!\/)|assets\/)/i.test(source) ? source : "";
+  }
+
+  function getProductImages(product) {
+    const sources = [
+      ...(Array.isArray(product.images) ? product.images : []),
+      product.image,
+      product.secondary_image,
+      product.image2
+    ].map(safeProductImage).filter(Boolean);
+    const uniqueSources = [...new Set(sources)];
+    return uniqueSources.length ? uniqueSources : [productImageFallback];
+  }
+
+  function prepareProductImages(root) {
+    root.querySelectorAll(".product-image, [data-gallery-image]").forEach((image) => {
+      const markReady = () => {
+        image.classList.add("is-loaded");
+        const container = image.closest(".product-image-wrap, .product-detail-gallery");
+        if (container && !image.classList.contains("product-image-secondary")) {
+          container.dataset.imageReady = "true";
+        }
+      };
+      image.addEventListener("load", markReady, { once: true });
+      if (image.complete && image.naturalWidth > 0) markReady();
+    });
+  }
+
+  function renderProductSkeletons() {
+    if (products.length) return;
+    document.querySelectorAll("[data-product-list]").forEach((list) => {
+      list.setAttribute("aria-busy", "true");
+      list.classList.add("is-skeleton-loading");
+      list.innerHTML = Array.from({ length: 4 }, () => `
+        <div class="product-skeleton" aria-hidden="true">
+          <div class="product-skeleton-image"></div>
+          <div class="product-skeleton-line"></div>
+          <div class="product-skeleton-line product-skeleton-line-short"></div>
+        </div>`).join("");
+    });
+  }
+
   function renderProductCard(product) {
-    const sizes = (Array.isArray(product.sizes) ? product.sizes : []).map((size) => `<option value="${escapeHtml(size)}">${escapeHtml(t(size))}</option>`).join("");
     const tag = product.tag ? `<span class="product-tag">${escapeHtml(productText(product, "tag"))}</span>` : "";
     const mrp = product.mrp ? `<span class="product-mrp">${formatPrice(product.mrp)}</span>` : "";
-    const colorOptions = (product.colors || []).map((color) => `<option value="${escapeHtml(color)}">${escapeHtml(t(color))}</option>`).join("");
     const isSaved = wishlist.includes(product.id);
     const outOfStock = Number.isInteger(product.stock) && product.stock < 1;
-    const image = typeof product.image === "string" && /^(https:\/\/|\/|assets\/)/i.test(product.image)
-      ? product.image
-      : productImageFallback;
+    const photos = getProductImages(product);
+    const image = photos[0];
+    const secondImage = photos[1];
     return `
       <article class="product-card">
-        <div class="product-image-wrap">
-          <button type="button" class="product-image-button" data-product-details="${escapeHtml(product.id)}" aria-label="${t("View details")}: ${escapeHtml(productText(product, "name"))}"><img class="product-image" src="${escapeHtml(image)}" alt="${escapeHtml(product.brand)} ${escapeHtml(productText(product, "name"))}" loading="lazy" decoding="async"></button>
+        <div class="product-image-wrap" data-image-ready="false">
+          <button type="button" class="product-image-button" data-product-details="${escapeHtml(product.id)}" aria-label="${t("View details")}: ${escapeHtml(productText(product, "name"))}">
+            <img class="product-image" src="${escapeHtml(image)}" alt="${escapeHtml(product.brand)} ${escapeHtml(productText(product, "name"))}" width="900" height="1080" loading="lazy" decoding="async" sizes="(max-width: 640px) 50vw, (max-width: 900px) 33vw, 25vw">
+            ${secondImage ? `<img class="product-image product-image-secondary" src="${escapeHtml(secondImage)}" alt="" aria-hidden="true" width="900" height="1080" loading="lazy" decoding="async">` : ""}
+          </button>
           ${tag}<button class="wishlist-button ${isSaved ? "is-saved" : ""}" type="button" data-wishlist="${escapeHtml(product.id)}" aria-pressed="${isSaved}" aria-label="${t("Wishlist")}: ${escapeHtml(productText(product, "name"))}">♡</button>
-          <button class="product-add" type="button" data-add-product="${escapeHtml(product.id)}" aria-label="${t("Add to order")} ${escapeHtml(productText(product, "name"))}" ${outOfStock ? "disabled" : ""}>${outOfStock ? "×" : "+"}</button>
+          <div class="product-hover-actions">
+            <button type="button" class="product-quick-view" data-product-details="${escapeHtml(product.id)}">${t("Quick view")}</button>
+            <button type="button" class="product-quick-add" data-add-product="${escapeHtml(product.id)}" ${outOfStock ? "disabled" : ""}>${outOfStock ? t("Sold out") : t("Add to order")}</button>
+          </div>
         </div>
         <div class="product-meta"><span>${escapeHtml(product.brand)}</span><span>${escapeHtml(productText(product, "category"))}</span></div>
         <h3>${escapeHtml(productText(product, "name"))}</h3>
         <div class="product-price"><strong>${formatPrice(product.price)}</strong>${mrp}</div>
         <button type="button" class="product-enquiry-button" data-product-enquiry="${escapeHtml(product.id)}"><svg class="btn-whatsapp-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91C2.13 13.66 2.59 15.36 3.45 16.86L2.05 22L7.3 20.62C8.75 21.41 10.38 21.83 12.04 21.83C17.5 21.83 21.95 17.38 21.95 11.92C21.95 9.27 20.92 6.78 19.05 4.91C17.18 3.03 14.69 2 12.04 2ZM12.05 20.15C10.57 20.15 9.12 19.75 7.85 19L7.55 18.82L4.43 19.64L5.26 16.6L5.06 16.29C4.24 14.99 3.8 13.47 3.8 11.91C3.8 7.37 7.5 3.67 12.05 3.67C14.25 3.67 16.31 4.53 17.87 6.09C19.42 7.65 20.28 9.72 20.28 11.92C20.28 16.46 16.59 20.15 12.05 20.15ZM16.57 14.34C16.32 14.21 15.1 13.61 14.88 13.53C14.65 13.45 14.49 13.41 14.32 13.66C14.16 13.9 13.69 14.46 13.54 14.62C13.4 14.79 13.26 14.81 13.01 14.68C12.76 14.56 11.97 14.3 11.03 13.46C10.3 12.81 9.8 12.01 9.66 11.76C9.52 11.51 9.64 11.38 9.77 11.25C9.88 11.14 10.02 10.96 10.14 10.82C10.27 10.68 10.31 10.57 10.39 10.41C10.47 10.24 10.43 10.1 10.37 9.98C10.31 9.85 9.81 8.63 9.61 8.13C9.41 7.65 9.2 7.71 9.05 7.71C8.91 7.7 8.74 7.7 8.58 7.7C8.41 7.7 8.14 7.76 7.91 8.01C7.68 8.26 7.03 8.87 7.03 10.12C7.03 11.37 7.94 12.57 8.07 12.74C8.2 12.91 9.85 15.46 12.38 16.55C12.98 16.81 13.45 16.97 13.82 17.08C14.42 17.27 14.97 17.25 15.4 17.18C15.89 17.11 16.9 16.57 17.11 15.99C17.32 15.41 17.32 14.92 17.25 14.81C17.19 14.7 17.02 14.64 16.77 14.51L16.57 14.34Z"/></svg><span>${t("Enquire on WhatsApp")}</span><span class="product-enquiry-arrow" aria-hidden="true">↗</span></button>
-        <div class="product-card-actions">
-          <label class="sr-only" for="size-${escapeHtml(product.id)}">${t("Size for")} ${escapeHtml(productText(product, "name"))}</label>
-          <select id="size-${escapeHtml(product.id)}" data-product-size="${escapeHtml(product.id)}" aria-label="${t("Size for")} ${escapeHtml(productText(product, "name"))}">${sizes}</select>
-          ${colorOptions ? `<label class="sr-only" for="color-${escapeHtml(product.id)}">${t("Colour")} ${escapeHtml(productText(product, "name"))}</label><select id="color-${escapeHtml(product.id)}" data-product-color="${escapeHtml(product.id)}" aria-label="${t("Colour")} ${escapeHtml(productText(product, "name"))}">${colorOptions}</select>` : ""}
-          <button class="add-button" type="button" data-add-product="${escapeHtml(product.id)}" ${outOfStock ? "disabled" : ""}>${outOfStock ? t("Sold out") : t("Add to order")} <span aria-hidden="true">${outOfStock ? "" : "+"}</span></button>
-        </div>
-        <button type="button" class="product-details-link" data-product-details="${escapeHtml(product.id)}">${t("View details")} ↗</button>
       </article>`;
   }
 
   function renderProducts() {
+    const activeControl = document.activeElement;
+    let restoreFocus = "";
+    let restoreCategory = "";
+    let restoreSelectionStart = null;
+    let restoreSelectionEnd = null;
+    if (activeControl instanceof HTMLElement) {
+      if (activeControl.matches("[data-product-search]")) {
+        restoreFocus = "[data-product-search]";
+        if (activeControl instanceof HTMLInputElement) {
+          restoreSelectionStart = activeControl.selectionStart;
+          restoreSelectionEnd = activeControl.selectionEnd;
+        }
+      } else if (activeControl.matches("[data-price-min]")) restoreFocus = "[data-price-min]";
+      else if (activeControl.matches("[data-price-max]")) restoreFocus = "[data-price-max]";
+      else if (activeControl.matches("[data-product-sort]")) restoreFocus = "[data-product-sort]";
+      else if (activeControl.matches("[data-show-wishlist]")) restoreFocus = "[data-show-wishlist]";
+      else if (activeControl.matches("[data-filter-category]")) {
+        restoreFocus = "category";
+        restoreCategory = activeControl.dataset.filterCategory;
+      }
+    }
+
     const collection = document.querySelector("[data-category-filters]");
     if (collection && !document.querySelector("[data-catalog-controls]")) {
       collection.insertAdjacentHTML("beforebegin", `<div class="catalog-controls" data-catalog-controls>
@@ -574,9 +641,6 @@
       document.querySelector("[data-product-search]")?.addEventListener("input", (event) => {
         searchQuery = event.target.value.trim().toLocaleLowerCase();
         renderProducts();
-        const field = document.querySelector("[data-product-search]");
-        field.focus();
-        field.setSelectionRange(field.value.length, field.value.length);
       });
       document.querySelector("[data-price-min]")?.addEventListener("change", (event) => { priceMin = event.target.value; renderProducts(); });
       document.querySelector("[data-price-max]")?.addEventListener("change", (event) => { priceMax = event.target.value; renderProducts(); });
@@ -591,7 +655,7 @@
         <button type="button" class="filter-chip" data-show-wishlist>${t("Wishlist")} (<span data-wishlist-count>${wishlist.length}</span>)</button>`;
       const sortSelect = document.querySelector("[data-product-sort]");
       if (sortSelect) sortSelect.value = sortOrder;
-      document.querySelector("[data-product-search]")?.addEventListener("input", (event) => { searchQuery = event.target.value.trim().toLocaleLowerCase(); renderProducts(); const field = document.querySelector("[data-product-search]"); field.focus(); field.setSelectionRange(field.value.length, field.value.length); });
+      document.querySelector("[data-product-search]")?.addEventListener("input", (event) => { searchQuery = event.target.value.trim().toLocaleLowerCase(); renderProducts(); });
       document.querySelector("[data-price-min]")?.addEventListener("change", (event) => { priceMin = event.target.value; renderProducts(); });
       document.querySelector("[data-price-max]")?.addEventListener("change", (event) => { priceMax = event.target.value; renderProducts(); });
       document.querySelector("[data-product-sort]")?.addEventListener("change", (event) => { sortOrder = event.target.value; renderProducts(); });
@@ -600,6 +664,8 @@
     document.querySelectorAll("[data-product-list]").forEach((list) => {
       const type = list.dataset.productList;
       const limit = Number(list.dataset.limit || 4);
+      list.classList.remove("is-skeleton-loading");
+      list.removeAttribute("aria-busy");
       let visible = [...products];
       if (type === "featured" || type === "bestsellers") {
         visible.sort((a, b) => Number(Boolean(b.bestseller)) - Number(Boolean(a.bestseller)));
@@ -622,6 +688,7 @@
         if (sortOrder === "new") visible.sort((a, b) => Number(Boolean(b.new_arrival)) - Number(Boolean(a.new_arrival)) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
       }
       list.innerHTML = visible.map(renderProductCard).join("");
+      prepareProductImages(list);
       if (!visible.length) {
         const emptyMessage = {
           featured: "No styles in this category just yet. Please check back soon.",
@@ -647,8 +714,20 @@
     if (recentContainer) {
       const recentProducts = recentlyViewed.map((id) => products.find((item) => item.id === id)).filter(Boolean);
       recentContainer.innerHTML = recentProducts.map(renderProductCard).join("") || `<p class="small-note">${t("No recently viewed products yet.")}</p>`;
+      prepareProductImages(recentContainer);
     }
     document.querySelectorAll("[data-wishlist-count]").forEach((element) => { element.textContent = String(wishlist.length); });
+
+    if (restoreFocus === "category") {
+      [...document.querySelectorAll("[data-filter-category]")].find((button) => button.dataset.filterCategory === restoreCategory)?.focus({ preventScroll: true });
+    } else if (restoreFocus) {
+      const focusElement = document.querySelector(restoreFocus);
+      focusElement?.focus({ preventScroll: true });
+      if (restoreFocus === "[data-product-search]" && focusElement instanceof HTMLInputElement && restoreSelectionStart !== null) {
+        const end = restoreSelectionEnd === null ? restoreSelectionStart : restoreSelectionEnd;
+        focusElement.setSelectionRange(restoreSelectionStart, end);
+      }
+    }
   }
 
   let showingWishlist = false;
@@ -663,16 +742,15 @@
       showToast(t("That style could not be found. Please refresh and try again."));
       return;
     }
-    const sizeSelect = document.querySelector(`[data-product-size="${CSS.escape(productId)}"]`);
-    const detailSize = source?.closest("[data-product-modal]")?.querySelector("#detail-size");
+    const productModal = source?.closest("[data-product-modal]");
+    const detailSize = productModal?.querySelector('[name="detail-size"]:checked') || productModal?.querySelector("#detail-size");
     if (Number.isInteger(product.stock) && product.stock < 1) {
       showToast(t("This product is currently out of stock."));
       return;
     }
-    const size = detailSize ? detailSize.value : (sizeSelect ? sizeSelect.value : product.sizes[0]);
-    const colorSelect = document.querySelector(`[data-product-color="${CSS.escape(productId)}"]`);
-    const detailColor = source?.closest("[data-product-modal]")?.querySelector("#detail-color");
-    const color = detailColor ? detailColor.value : (colorSelect ? colorSelect.value : (product.colors || [])[0] || "");
+    const size = detailSize ? detailSize.value : product.sizes?.[0] || "";
+    const detailColor = productModal?.querySelector('[name="detail-color"]:checked') || productModal?.querySelector("#detail-color");
+    const color = detailColor ? detailColor.value : (product.colors || [])[0] || "";
     const cartSize = color ? `${size} · ${color}` : size;
     const existing = cart.find((entry) => entry.id === productId && entry.size === cartSize);
     const productQuantity = cart.reduce((total, entry) => total + (entry.id === productId ? entry.qty : 0), 0);
@@ -697,7 +775,39 @@
     window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
-  function openProductDetails(productId) {
+  function renderVariantOptions(name, label, values) {
+    if (!values.length) return "";
+    return `<fieldset class="variant-group">
+      <legend>${t(label)}</legend>
+      <div class="variant-options">${values.map((value, index) => `
+        <label class="variant-chip">
+          <input type="radio" name="${name}" value="${escapeHtml(value)}" ${index === 0 ? "checked" : ""}>
+          <span>${escapeHtml(t(value))}</span>
+        </label>`).join("")}</div>
+    </fieldset>`;
+  }
+
+  function stepProductGallery(step) {
+    const modal = document.querySelector("[data-product-modal]");
+    const product = products.find((item) => item.id === modal?.dataset.productId);
+    const photos = product ? getProductImages(product) : [];
+    if (!modal || photos.length < 2) return;
+
+    const nextIndex = (Number(modal.dataset.galleryIndex || 0) + step + photos.length) % photos.length;
+    const image = modal.querySelector("[data-gallery-image]");
+    const gallery = image?.closest(".product-detail-gallery");
+    if (!image || !gallery) return;
+    modal.dataset.galleryIndex = String(nextIndex);
+    image.classList.remove("is-loaded", "image-unavailable");
+    delete image.dataset.fallbackApplied;
+    gallery.dataset.imageReady = "false";
+    image.src = photos[nextIndex];
+    const position = modal.querySelector("[data-gallery-position]");
+    if (position) position.textContent = `${nextIndex + 1} / ${photos.length}`;
+    prepareProductImages(modal);
+  }
+
+  function openProductDetails(productId, trigger = document.activeElement) {
     const product = products.find((item) => item.id === productId);
     const modal = document.querySelector("[data-product-modal]");
     const content = document.querySelector("[data-product-detail]");
@@ -708,36 +818,77 @@
     } catch (error) {
       console.error("Could not save recently viewed products.", error);
     }
-    const photos = Array.isArray(product.images) && product.images.length ? product.images : [product.image];
-    const colorOptions = (product.colors || []).map((color) => `<option value="${escapeHtml(color)}">${escapeHtml(t(color))}</option>`).join("");
-    const sizeOptions = (Array.isArray(product.sizes) ? product.sizes : []).map((size) => `<option value="${escapeHtml(size)}">${escapeHtml(t(size))}</option>`).join("");
+    const photos = getProductImages(product);
+    const colorOptions = renderVariantOptions("detail-color", "Colour", Array.isArray(product.colors) ? product.colors : []);
+    const sizeOptions = renderVariantOptions("detail-size", "Size", Array.isArray(product.sizes) ? product.sizes : []);
     content.innerHTML = `<div class="product-detail-layout">
-      <div class="product-detail-gallery"><img data-gallery-image src="${escapeHtml(photos[0])}" alt="${escapeHtml(product.brand)} ${escapeHtml(productText(product, "name"))}" loading="lazy" decoding="async">
+      <div class="product-detail-gallery" data-image-ready="false"><img data-gallery-image src="${escapeHtml(photos[0])}" alt="${escapeHtml(product.brand)} ${escapeHtml(productText(product, "name"))}" width="900" height="1080" loading="eager" decoding="async">
         ${photos.length > 1 ? `<button type="button" class="gallery-prev" data-gallery-step="-1" aria-label="Previous image">‹</button><button type="button" class="gallery-next" data-gallery-step="1" aria-label="Next image">›</button><span data-gallery-position>1 / ${photos.length}</span>` : ""}
       </div>
       <div class="product-detail-copy"><p class="eyebrow">${escapeHtml(product.brand)} · ${escapeHtml(productText(product, "category"))}</p><h2 id="product-modal-heading">${escapeHtml(productText(product, "name"))}</h2><p class="product-detail-price">${formatPrice(product.price)}${product.mrp ? ` <span class="product-mrp">${formatPrice(product.mrp)}</span>` : ""}</p>
         <p>${t("Indicative sample-catalogue price. Please contact the store to confirm current price and availability.")}</p>
-        <label for="detail-size">${t("Size")}</label><select id="detail-size">${sizeOptions}</select>
-        ${colorOptions ? `<label for="detail-color">${t("Colour")}</label><select id="detail-color">${colorOptions}</select>` : ""}
+        ${sizeOptions}
+        ${colorOptions}
         <button type="button" class="button button-brown button-full" data-add-product="${escapeHtml(product.id)}" ${Number.isInteger(product.stock) && product.stock < 1 ? "disabled" : ""}>${Number.isInteger(product.stock) && product.stock < 1 ? t("Sold out") : `${t("Add to order")} +`}</button>
         <button type="button" class="button button-whatsapp button-full" data-product-enquiry="${escapeHtml(product.id)}">${t("Enquire on WhatsApp")} ↗</button>
       </div></div>`;
+    if (productModalCloseTimer) window.clearTimeout(productModalCloseTimer);
+    productModalCloseTimer = 0;
+    productTrigger = trigger;
+    const triggerProductId = productTrigger instanceof HTMLElement ? productTrigger.dataset.productDetails : "";
     modal.hidden = false;
-    productTrigger = document.activeElement;
+    modal.classList.remove("is-open");
+    delete modal.dataset.closing;
     modal.dataset.productId = product.id;
     modal.dataset.galleryIndex = "0";
     document.body.classList.add("modal-is-open");
-    modal.querySelector(".product-modal-close").focus();
+    prepareProductImages(modal);
+
+    const gallery = modal.querySelector(".product-detail-gallery");
+    let swipeStart = null;
+    gallery?.addEventListener("pointerdown", (event) => {
+      if (event.pointerType !== "touch" || event.target.closest("button")) return;
+      swipeStart = { x: event.clientX, y: event.clientY };
+    }, { passive: true });
+    gallery?.addEventListener("pointerup", (event) => {
+      if (!swipeStart || event.pointerType !== "touch") return;
+      const deltaX = event.clientX - swipeStart.x;
+      const deltaY = event.clientY - swipeStart.y;
+      swipeStart = null;
+      if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        stepProductGallery(deltaX < 0 ? 1 : -1);
+      }
+    }, { passive: true });
+    gallery?.addEventListener("pointercancel", () => { swipeStart = null; }, { passive: true });
+
     renderProducts();
+    if (triggerProductId) {
+      productTrigger = document.querySelector(`[data-product-details="${CSS.escape(triggerProductId)}"]`) || productTrigger;
+    }
+    modal.querySelector(".product-modal-close").focus();
+    requestAnimationFrame(() => {
+      if (!modal.hidden) modal.classList.add("is-open");
+    });
   }
 
   function closeProductDetails() {
     const modal = document.querySelector("[data-product-modal]");
-    if (!modal) return;
-    modal.hidden = true;
-    document.body.classList.remove("modal-is-open");
-    if (productTrigger instanceof HTMLElement) productTrigger.focus();
-    productTrigger = null;
+    if (!modal || modal.hidden || modal.dataset.closing) return;
+    modal.classList.remove("is-open");
+    modal.dataset.closing = "true";
+    const closeDelay = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
+    productModalCloseTimer = window.setTimeout(() => {
+      modal.hidden = true;
+      delete modal.dataset.closing;
+      document.body.classList.remove("modal-is-open");
+      let trigger = productTrigger;
+      if (!(trigger instanceof HTMLElement) || !trigger.isConnected) {
+        trigger = document.querySelector(`[data-product-details="${CSS.escape(modal.dataset.productId || "")}"]`);
+      }
+      if (trigger instanceof HTMLElement) trigger.focus();
+      productTrigger = null;
+      productModalCloseTimer = 0;
+    }, closeDelay);
   }
 
   function sendContactEnquiry(event) {
@@ -762,12 +913,17 @@
     form.reset();
   }
 
-  function updateCart() {
+  function updateCart({ preserveItems = false } = {}) {
     const count = cart.reduce((total, entry) => total + entry.qty, 0);
     document.querySelectorAll("[data-cart-count]").forEach((element) => {
       element.textContent = String(count);
       element.setAttribute("aria-label", `${count} ${t(count === 1 ? "item" : "items")} ${t("in your order")}`);
+      if (lastCartCount !== null && count > lastCartCount) {
+        element.classList.remove("is-bouncing");
+        requestAnimationFrame(() => element.classList.add("is-bouncing"));
+      }
     });
+    lastCartCount = count;
     const items = document.querySelector("[data-cart-items]");
     const total = document.querySelector("[data-cart-total]");
     if (!items || !total) return;
@@ -777,19 +933,47 @@
       return sum + (product ? product.price * entry.qty : 0);
     }, 0);
     total.textContent = formatPrice(cartTotal);
+    if (preserveItems) return;
     if (!cart.length) {
       items.innerHTML = `<div class="empty-cart"><span class="empty-cart-icon">＋</span><h3>${t("Your order is waiting.")}</h3><p>${t("Browse the collection and add a style you like.")}</p><button class="text-link cart-browse" type="button">${t("Browse collection")} <span aria-hidden="true">↗</span></button></div>`;
       return;
     }
-    items.innerHTML = cart.map((entry) => {
+    const existingKeys = new Set(Array.from(items.querySelectorAll(".cart-item"), (row) => row.dataset.cartKey));
+    items.innerHTML = cart.map((entry, index) => {
       const product = products.find((item) => item.id === entry.id);
       if (!product) return "";
-      return `<article class="cart-item">
-        <img src="${escapeHtml(product.image)}" alt="" loading="lazy">
+      const cartKey = JSON.stringify([entry.id, entry.size]);
+      const enteringClass = existingKeys.has(cartKey) ? "" : " is-entering";
+      const enterDelay = Math.min(index * 45, 180);
+      return `<article class="cart-item${enteringClass}" data-cart-key="${escapeHtml(cartKey)}" data-cart-entry-id="${escapeHtml(entry.id)}" data-cart-entry-size="${escapeHtml(entry.size)}" style="--cart-item-delay:${enterDelay}ms">
+        <img src="${escapeHtml(getProductImages(product)[0])}" alt="" width="84" height="104" loading="lazy">
         <div class="cart-item-info"><span>${escapeHtml(product.brand)}</span><h3>${escapeHtml(productText(product, "name"))}</h3><p>${t("Size:")} ${escapeHtml(entry.size)} · ${formatPrice(product.price)}</p><div class="quantity-control"><button type="button" data-quantity-step="-1" data-id="${escapeHtml(entry.id)}" data-size="${escapeHtml(entry.size)}" aria-label="${t("Decrease quantity")} ${escapeHtml(productText(product, "name"))}">−</button><span>${entry.qty}</span><button type="button" data-quantity-step="1" data-id="${escapeHtml(entry.id)}" data-size="${escapeHtml(entry.size)}" aria-label="${t("Increase quantity")} ${escapeHtml(productText(product, "name"))}">+</button></div></div>
         <button type="button" class="remove-item" data-remove-item="${escapeHtml(entry.id)}" data-size="${escapeHtml(entry.size)}" aria-label="${t("Remove from your order")} ${escapeHtml(productText(product, "name"))}">×</button>
       </article>`;
     }).join("");
+  }
+
+  function removeCartItem(productId, size, row) {
+    if (row?.classList.contains("is-removing")) return;
+    const hasFocus = Boolean(row?.contains(document.activeElement));
+    if (!cart.some((entry) => entry.id === productId && entry.size === size)) return;
+    cart = cart.filter((entry) => entry.id !== productId || entry.size !== size);
+    saveCart();
+    if (!row) {
+      updateCart();
+      return;
+    }
+    row.classList.add("is-removing");
+    updateCart({ preserveItems: true });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.setTimeout(() => {
+      updateCart();
+      if (hasFocus) {
+        const nextControl = document.querySelector("[data-cart-items] .cart-item [data-quantity-step]")
+          || document.querySelector("[data-order-drawer] .drawer-close");
+        nextControl?.focus();
+      }
+    }, reducedMotion ? 0 : 190);
   }
 
   function updateQuantity(productId, size, step) {
@@ -801,8 +985,13 @@
       showToast(t("No additional units are currently available."));
       return;
     }
+    if (step < 0 && entry.qty <= 1) {
+      const row = Array.from(document.querySelectorAll(".cart-item[data-cart-entry-id]"))
+        .find((item) => item.dataset.cartEntryId === String(productId) && item.dataset.cartEntrySize === String(size));
+      removeCartItem(productId, size, row);
+      return;
+    }
     entry.qty += step;
-    if (entry.qty <= 0) cart = cart.filter((item) => item !== entry);
     saveCart();
     updateCart();
   }
@@ -811,7 +1000,9 @@
     const region = document.querySelector(".toast-region");
     if (!region) return;
     region.textContent = message;
-    region.classList.add("is-visible");
+    region.classList.remove("is-visible");
+    cancelAnimationFrame(showToast.frameId);
+    showToast.frameId = requestAnimationFrame(() => region.classList.add("is-visible"));
     clearTimeout(showToast.timeoutId);
     showToast.timeoutId = setTimeout(() => region.classList.remove("is-visible"), 3600);
   }
@@ -820,18 +1011,36 @@
     const drawer = document.querySelector("[data-order-drawer]");
     const backdrop = document.querySelector("[data-drawer-backdrop]");
     if (!drawer || !backdrop) return;
-    drawer.classList.toggle("is-open", open);
-    drawer.setAttribute("aria-hidden", String(!open));
-    backdrop.hidden = !open;
-    document.body.classList.toggle("drawer-is-open", open);
     if (open) {
-      drawerTrigger = document.activeElement;
+      clearTimeout(drawerCloseTimer);
+      const alreadyOpen = drawer.classList.contains("is-open") && !drawer.classList.contains("is-closing");
+      drawer.classList.add("is-open");
+      drawer.classList.remove("is-closing");
+      drawer.setAttribute("aria-hidden", "false");
+      backdrop.hidden = false;
+      document.body.classList.add("drawer-is-open");
+      requestAnimationFrame(() => {
+        if (drawer.classList.contains("is-open") && !drawer.classList.contains("is-closing")) {
+          backdrop.classList.add("is-visible");
+        }
+      });
+      if (!alreadyOpen) drawerTrigger = document.activeElement;
       updateCart();
-      drawer.querySelector(".drawer-close").focus();
-    } else if (drawerTrigger instanceof HTMLElement) {
-      drawerTrigger.focus();
-      drawerTrigger = null;
+      drawer.querySelector(".drawer-close")?.focus();
+      return;
     }
+    if (!drawer.classList.contains("is-open") || drawer.classList.contains("is-closing")) return;
+    drawer.classList.add("is-closing");
+    backdrop.classList.remove("is-visible");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    drawerCloseTimer = window.setTimeout(() => {
+      drawer.classList.remove("is-open", "is-closing");
+      drawer.setAttribute("aria-hidden", "true");
+      backdrop.hidden = true;
+      document.body.classList.remove("drawer-is-open");
+      if (drawerTrigger instanceof HTMLElement) drawerTrigger.focus();
+      drawerTrigger = null;
+    }, reducedMotion ? 0 : 290);
   }
 
   function buildOrderMessage(customer) {
@@ -948,7 +1157,7 @@
     }
     const details = target.closest("[data-product-details]");
     if (details) {
-      openProductDetails(details.dataset.productDetails);
+      openProductDetails(details.dataset.productDetails, details);
       return;
     }
     const productEnquiry = target.closest("[data-product-enquiry]");
@@ -968,6 +1177,14 @@
         showToast(t("Your wishlist could not be saved in this browser."));
       }
       renderProducts();
+      const updatedButton = document.querySelector(`[data-wishlist="${CSS.escape(id)}"]`);
+      if (updatedButton) {
+        updatedButton.focus({ preventScroll: true });
+        updatedButton.classList.add("is-popped");
+        window.setTimeout(() => updatedButton.classList.remove("is-popped"), 520);
+      } else {
+        document.querySelector("[data-show-wishlist]")?.focus({ preventScroll: true });
+      }
       return;
     }
     if (target.closest("[data-show-wishlist]")) {
@@ -983,15 +1200,7 @@
     }
     const galleryStep = target.closest("[data-gallery-step]");
     if (galleryStep) {
-      const modal = document.querySelector("[data-product-modal]");
-      const product = products.find((item) => item.id === modal?.dataset.productId);
-      const images = product && Array.isArray(product.images) && product.images.length ? product.images : product ? [product.image] : [];
-      if (modal && images.length > 1) {
-        const index = (Number(modal.dataset.galleryIndex) + Number(galleryStep.dataset.galleryStep) + images.length) % images.length;
-        modal.dataset.galleryIndex = String(index);
-        modal.querySelector("[data-gallery-image]").src = images[index];
-        modal.querySelector("[data-gallery-position]").textContent = `${index + 1} / ${images.length}`;
-      }
+      stepProductGallery(Number(galleryStep.dataset.galleryStep));
       return;
     }
     if (target.closest("[data-language-toggle]")) {
@@ -1011,9 +1220,7 @@
     }
     const remove = target.closest("[data-remove-item]");
     if (remove) {
-      cart = cart.filter((entry) => entry.id !== remove.dataset.removeItem || entry.size !== remove.dataset.size);
-      saveCart();
-      updateCart();
+      removeCartItem(remove.dataset.removeItem, remove.dataset.size, remove.closest(".cart-item"));
       return;
     }
     if (target.closest(".cart-open")) {
@@ -1132,8 +1339,14 @@
         return;
       }
       if (!image.classList.contains("product-image") && !image.hasAttribute("data-gallery-image")) return;
+      if (image.classList.contains("product-image-secondary")) {
+        image.classList.add("image-unavailable");
+        return;
+      }
       if (image.dataset.fallbackApplied === "true") {
         image.classList.add("image-unavailable");
+        const container = image.closest(".product-image-wrap, .product-detail-gallery");
+        if (container) container.dataset.imageReady = "true";
         return;
       }
       image.dataset.fallbackApplied = "true";
